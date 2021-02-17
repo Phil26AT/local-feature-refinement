@@ -68,6 +68,7 @@ if __name__ == "__main__":
     )
 
     # Create a copy of the dummy database.
+    print(paths.database_path)
     if os.path.exists(paths.database_path):
         raise FileExistsError(
             'The database file already exists.'

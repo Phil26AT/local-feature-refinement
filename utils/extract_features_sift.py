@@ -66,7 +66,8 @@ if __name__ == '__main__':
         '--image_path', args.image_path,
         '--SiftExtraction.max_image_size', str(args.max_edge),
         '--SiftExtraction.max_num_features', str(1000000),
-        '--SiftExtraction.first_octave', '0'
+        '--SiftExtraction.first_octave', '0',
+        '--SiftExtraction.use_gpu', '0'
     ], stdout=FNULL)
     FNULL.close()
 

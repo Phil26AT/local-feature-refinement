@@ -79,9 +79,10 @@ if __name__ == '__main__':
 
     # Define extra paths.
     paths = types.SimpleNamespace()
-    paths.dataset_path = os.path.join('ETH3D', args.dataset_name)
+    paths.dataset_path = os.path.join('/cluster/scratch/plindenbe/ETH3D', args.dataset_name)
     paths.scan_file = os.path.join(paths.dataset_path, 'dslr_scan_eval', 'scan_alignment.mlp')
     paths.image_path = os.path.join(paths.dataset_path, 'images')
+    print(paths.image_path)
     paths.match_list_file = os.path.join(paths.dataset_path, 'match-list.txt')
     paths.matches_file = os.path.join('output', '%s-%s-matches.pb' % (args.method_name, args.dataset_name))
     paths.solution_file = os.path.join('output', '%s-%s-solution.pb' % (args.method_name, args.dataset_name))
@@ -103,6 +104,7 @@ if __name__ == '__main__':
         '--output_file', paths.matches_file
     ])
 
+    skip_refinement = True
     # Run the multi-view optimization.
     if not skip_refinement:
         subprocess.call([
