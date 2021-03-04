@@ -69,10 +69,10 @@ if __name__ == "__main__":
 
     # Create a copy of the dummy database.
     print(paths.database_path)
-    if os.path.exists(paths.database_path):
-        raise FileExistsError(
-            'The database file already exists.'
-        )
+    # if os.path.exists(paths.database_path):
+    #     raise FileExistsError(
+    #         'The database file already exists.'
+    #     )
     shutil.copyfile(
         os.path.join(args.dataset_path, 'database.db'),
         paths.database_path
@@ -92,5 +92,5 @@ if __name__ == "__main__":
         args.colmap_path,
         paths.database_path, paths.image_path,
         paths.empty_model_path,
-        paths.model_path, paths.ply_model_path
+        paths.model_path, paths.ply_model_path, None,
     )

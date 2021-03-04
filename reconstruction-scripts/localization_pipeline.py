@@ -8,8 +8,6 @@ import os
 
 import shutil
 
-import torch
-
 import types
 
 from tqdm import tqdm
@@ -69,18 +67,25 @@ def parse_args():
         help='path to the output results file'
     )
 
+    parser.add_argument(
+        '--fm_triangulation', type=int, default=0,
+        help='Enable Feature-Metric Triangulation'
+    )
+
     args = parser.parse_args()
     return args
 
 
 if __name__ == "__main__":
    # Torch settings for the two-view estimation network.
-    torch.set_grad_enabled(False)
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda:0" if use_cuda else "cpu")
+    #torch.set_grad_enabled(False)
+    #use_cuda = torch.cuda.is_available()
+    #device = torch.device("cuda:0" if use_cuda else "cpu")
 
     # Create the two-view estimation network.
-    net = PANet().to(device)
+    #net = PANet().to("cpu")
+    net = None
+    device = "cpu"
 
     # Parse arguments.
     args = parse_args()
@@ -152,7 +157,7 @@ if __name__ == "__main__":
             image_id, image_name, camera_dict, holdout_image_names, numpy_images, facts, net, device, args.batch_size,
             args.colmap_path, args.dataset_name, args.dataset_path, args.method_name, args.refine, args.matches_file,
             paths.dummy_database_path, paths.image_path, paths.reference_model_path, paths.match_list_path
-        )
+        , bool(args.fm_triangulation))
 
         # Pose error.
         with open(args.output_path, 'a') as f:
@@ -173,3 +178,32 @@ if __name__ == "__main__":
                 center_error = np.linalg.norm(C - annotated_C)
 
                 f.write('[%s] - orientation error %4f deg, camera center error %4f\n' % (image_name, ori_error, center_error))
+
+        if (args.fm_triangulation):
+            # Localize image.
+            pose = localize(
+                image_id, image_name, camera_dict, holdout_image_names, numpy_images, facts, net, device, args.batch_size,
+                args.colmap_path, args.dataset_name, args.dataset_path, args.method_name, args.refine, args.matches_file,
+                paths.dummy_database_path, paths.image_path, paths.reference_model_path, paths.match_list_path
+            , False)
+
+            # Pose error.
+            with open(args.output_path, 'a') as f:
+                if pose is None:
+                    f.write('[%s] - failed\n' % image_name)
+                else:
+                    # Compute the error
+                    annotated_R = annotated_pose[: 3, : 3]
+                    annotated_t = annotated_pose[: 3, 3]
+                    R = pose[: 3, : 3]
+                    t = pose[: 3, 3]
+
+                    rotation_difference = R @ annotated_R.transpose()
+                    ori_error = np.rad2deg(np.arccos(np.clip((np.trace(rotation_difference) - 1) / 2, -1, 1)))
+
+                    annotated_C = (-1) * annotated_R.transpose() @ annotated_t
+                    C = (-1) * R.transpose() @ t
+                    center_error = np.linalg.norm(C - annotated_C)
+
+                    f.write('Raw: [%s] - orientation error %4f deg, camera center error %4f\n' % (image_name, ori_error, center_error))
+        

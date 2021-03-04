@@ -65,7 +65,6 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-
 if __name__ == '__main__':
     args = parse_args()
 
@@ -92,17 +91,17 @@ if __name__ == '__main__':
     paths.raw_results_file = os.path.join('output', '%s-%s-raw.txt' % (args.method_name, args.dataset_name))
 
     # Compute the tentative matches graph and the two-view patch geometry estimates.
-    subprocess.call([
-        'python', 'two-view-refinement/compute_match_graph.py',
-        '--method_name', args.method_name,
-        '--max_edge', str(max_size_dict[args.method_name][0]),
-        '--max_sum_edges', str(max_size_dict[args.method_name][1]),
-        '--image_path', paths.image_path,
-        '--match_list_file', paths.match_list_file,
-        '--matcher', matcher_dict[args.method_name][0],
-        '--threshold', str(matcher_dict[args.method_name][1]),
-        '--output_file', paths.matches_file
-    ])
+    # subprocess.call([
+    #     'python', 'two-view-refinement/compute_match_graph.py',
+    #     '--method_name', args.method_name,
+    #     '--max_edge', str(max_size_dict[args.method_name][0]),
+    #     '--max_sum_edges', str(max_size_dict[args.method_name][1]),
+    #     '--image_path', paths.image_path,
+    #     '--match_list_file', paths.match_list_file,
+    #     '--matcher', matcher_dict[args.method_name][0],
+    #     '--threshold', str(matcher_dict[args.method_name][1]),
+    #     '--output_file', paths.matches_file
+    # ])
 
     skip_refinement = True
     # Run the multi-view optimization.

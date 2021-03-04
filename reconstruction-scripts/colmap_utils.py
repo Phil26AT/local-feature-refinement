@@ -26,6 +26,30 @@ import types_pb2
 
 from refinement import refine_matches_coarse_to_fine
 
+fmcolmap_dict = { 
+    "rgb4" : ["--patch_size", "4"], 
+    "rgb4_warp" : ["--patch_size", "4","--FeatureBundleAdjustment.optimization_mode" ,"2"],
+    "s2d_mean" : ["--Featuremap.type","python128",
+            "--Featuremap.dtype","float",
+            "--Featuremap.python_levels","2",
+            "--FeatureBundleAdjustment.optimization_mode", "0",
+            '--Featuremap.python_command','cd ../.. && python -m features.s2dnet'],
+    "s2d_source" : ["--Featuremap.type","python128",
+            "--Featuremap.dtype","half",
+            "--Featuremap.python_levels","2",
+            "--FeatureBundleAdjustment.optimization_mode", "1",
+            '--Featuremap.python_command','cd .. && python -m features.s2dnet',
+            '--FeatureBundleAdjustment.use_embedded_point_iterations', "0",
+            "--FeatureBundleAdjustment.feature_loss_function_scale", "0.5",
+            "--Featuremap.batch_size", "100",
+            "--Featuremap.sparse", "0",
+            "--Featuremap.sparse_patch_size", "16",
+            "--FeatureBundleAdjustment.point_optimization_enabled", "1",
+            "--FeatureBundleAdjustment.point_loss_function_scale","8",
+            "--FeatureBundleAdjustment.point_loss_function_magnitude","1.0",
+            "--FeatureBundleAdjustment.berhu_slope","0.1",
+            "--FeatureBundleAdjustment.max_num_iterations","100"]
+}
 
 def generate_empty_reconstruction(reference_model_path, empty_model_path, holdout_image_names=[]):
     if not os.path.exists(empty_model_path):
@@ -319,7 +343,7 @@ def reconstruct(colmap_path, database_path, image_path, sparse_path):
     )
 
 
-def triangulate(colmap_path, database_path, image_path, empty_model_path, model_path, ply_model_path, stdout_file=None):
+def triangulate(colmap_path, database_path, image_path, empty_model_path, model_path, ply_model_path, dataset_name, stdout_file=None, fm_model_path = None):
     if stdout_file is None:
         stdout = sys.__stdout__
     else:
@@ -339,6 +363,30 @@ def triangulate(colmap_path, database_path, image_path, empty_model_path, model_
         '--Mapper.ba_refine_principal_point', '0',
         '--Mapper.ba_refine_extra_params', '0'
     ], stdout=stdout)
+
+    if fm_model_path is not None:
+        print("Feature Triangulation: ", model_path, fm_model_path)
+        #fmpath = partial_paths.model_path + "/fmreconstruction/"
+        cmd = ["/cluster/home/plindenbe/FeatureMetricSfM/build/fmcolmap", "feature_bundle_adjuster", 
+            '--image_path', image_path,
+            '--input_path', model_path,
+            '--output_path', fm_model_path,
+            '--FeatureBundleAdjustment.refine_focal_length', '0',
+            '--FeatureBundleAdjustment.refine_principal_point', '0',
+            '--FeatureBundleAdjustment.refine_extra_params', '0',
+            '--FeatureBundleAdjustment.refine_extrinsics', '0',
+            '--Featuremap.load_from_cache', "1",
+            '--Featuremap.cache_path', os.getenv("TMPDIR") + "/cache/" + dataset_name] + fmcolmap_dict["s2d_source"]
+        print(' '.join(cmd))
+        subprocess.call(cmd)
+
+        # Convert model to TXT.
+        subprocess.call([
+            os.path.join(colmap_path, 'colmap'), 'model_converter',
+            '--input_path', fm_model_path,
+            '--output_path', fm_model_path,
+            '--output_type', 'TXT'
+        ], stdout=stdout)
 
     # Convert model to TXT.
     subprocess.call([
@@ -548,7 +596,7 @@ def parse_reconstruction(scene_path):
 def localize(
         image_id, image_name, camera_dict, holdout_image_names, numpy_images, facts, net, device, batch_size,
         colmap_path, dataset_name, dataset_path, method_name, refine, matches_file,
-        dummy_database_path, image_path, reference_model_path, match_list_path
+        dummy_database_path, image_path, reference_model_path, match_list_path, fm_triangulation
 ):
     # Define local paths.
     partial_paths = types.SimpleNamespace()
@@ -562,6 +610,11 @@ def localize(
     partial_paths.model_path = os.path.join(
         dataset_path, 'sparse-%s-partial' % method_name
     )
+
+    partial_paths.fm_model_path = os.path.join(
+        dataset_path, 'sparse-%s-partial-fm' % method_name
+    )
+
     partial_paths.empty_model_path = os.path.join(
         dataset_path, 'sparse-%s-partial-empty' % method_name
     )
@@ -639,10 +692,22 @@ def localize(
     )
 
     # Triangulate model.
-    triangulate(colmap_path, partial_paths.database_path, image_path, partial_paths.empty_model_path, partial_paths.model_path, None, stdout_file=partial_paths.log_file)
+    if fm_triangulation:
+        triangulate(colmap_path, partial_paths.database_path, image_path, partial_paths.empty_model_path, partial_paths.model_path, None, dataset_name, stdout_file=partial_paths.log_file, fm_model_path = partial_paths.fm_model_path if fm_triangulation else None)
+    
+    """
+     Here we could add our fm-triangulation
+    
+    Just do: os.execute(["./fmcolmap", "feature_bundle_adjuster", ...])
+    
+    """
 
+    if fm_triangulation:
+        model_path = partial_paths.fm_model_path
+    else:
+        model_path = partial_paths.model_path
     # Parse reconstruction.
-    points3D, points2D_idx_to_points3D_id, points2D_idx_reprojected = parse_reconstruction(partial_paths.model_path)
+    points3D, points2D_idx_to_points3D_id, points2D_idx_reprojected = parse_reconstruction(model_path)
 
     # 2D-3D matching.
     image1 = numpy_images[image_name]
@@ -723,6 +788,10 @@ def localize(
 
         pose_dict = pycolmap.absolute_pose_estimation(pnp_points2D, pnp_points3D, camera_dict, 12)
 
+        """
+        Here we could use a localization pipeline in our method (maybe with pnp pose as initial guess)
+        """
+
         if pose_dict['success']:
             pose = colmap_pose_to_matrix(pose_dict['qvec'], pose_dict['tvec'])
         else:
@@ -737,6 +806,6 @@ def localize(
     os.remove(partial_paths.match_list_file)
 
     shutil.rmtree(partial_paths.empty_model_path)
-    shutil.rmtree(partial_paths.model_path)
+    shutil.rmtree(model_path)
 
     return pose

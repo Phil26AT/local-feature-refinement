@@ -63,7 +63,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-
+    skip_refinement = True
     # Check that method exists in dictionaries with constants.
     if (args.method_name not in max_size_dict) or (args.method_name not in matcher_dict):
         raise ValueError('Method \'%s\' is unknown. Make sure it was added to the dictionaries with constants.' % args.method_name)
@@ -74,26 +74,28 @@ if __name__ == '__main__':
 
     # Define extra paths.
     paths = types.SimpleNamespace()
-    paths.dataset_path = os.path.join('ETH3D', args.dataset_name)
+    paths.dataset_path = os.path.join('/cluster/scratch/plindenbe/ETH3D', args.dataset_name)
     paths.image_path = os.path.join(paths.dataset_path, 'images')
     paths.match_list_file = os.path.join(paths.dataset_path, 'match-list.txt')
     paths.matches_file = os.path.join('output', '%s-%s-matches.pb' % (args.method_name, args.dataset_name))
     paths.ref_results_file = os.path.join('output', '%s-%s-ref.loc.txt' % (args.method_name, args.dataset_name))
     paths.raw_results_file = os.path.join('output', '%s-%s-raw.loc.txt' % (args.method_name, args.dataset_name))
 
+    fm_triangulation = 1
+
     # Compute the tentative matches graph and the two-view patch geometry estimates.
-    subprocess.call([
-        'python', 'two-view-refinement/compute_match_graph.py',
-        '--method_name', args.method_name,
-        '--max_edge', str(max_size_dict[args.method_name][0]),
-        '--max_sum_edges', str(max_size_dict[args.method_name][1]),
-        '--image_path', paths.image_path,
-        '--match_list_file', paths.match_list_file,
-        '--matcher', matcher_dict[args.method_name][0],
-        '--threshold', str(matcher_dict[args.method_name][1]),
-        '--output_file', paths.matches_file
-    ])
-    
+    # subprocess.call([
+    #     'python', 'two-view-refinement/compute_match_graph.py',
+    #     '--method_name', args.method_name,
+    #     '--max_edge', str(max_size_dict[args.method_name][0]),
+    #     '--max_sum_edges', str(max_size_dict[args.method_name][1]),
+    #     '--image_path', paths.image_path,
+    #     '--match_list_file', paths.match_list_file,
+    #     '--matcher', matcher_dict[args.method_name][0],
+    #     '--threshold', str(matcher_dict[args.method_name][1]),
+    #     '--output_file', paths.matches_file
+    # ])
+
     # Run localization for refined features.
     if not skip_refinement:
         subprocess.call([
@@ -109,15 +111,29 @@ if __name__ == '__main__':
             '--output_path', paths.ref_results_file
         ])
     
-    # Run localization for raw features (without refinement).
-    subprocess.call([
-        'python', 'reconstruction-scripts/localization_pipeline.py',
-        '--colmap_path', args.colmap_path,
-        '--dataset_path', paths.dataset_path,
-        '--dataset_name', args.dataset_name,
-        '--method_name', args.method_name,
-        '--matches_file', paths.matches_file,
-        '--max_edge', str(max_size_dict[args.method_name][0]),
-        '--max_sum_edges', str(max_size_dict[args.method_name][1]),
-        '--output_path', paths.raw_results_file
-    ])
+    if not fm_triangulation:
+        # Run localization for raw features (without refinement).
+        subprocess.call([
+            'python', 'reconstruction-scripts/localization_pipeline.py',
+            '--colmap_path', args.colmap_path,
+            '--dataset_path', paths.dataset_path,
+            '--dataset_name', args.dataset_name,
+            '--method_name', args.method_name,
+            '--matches_file', paths.matches_file,
+            '--max_edge', str(max_size_dict[args.method_name][0]),
+            '--max_sum_edges', str(max_size_dict[args.method_name][1]),
+            '--output_path', paths.raw_results_file
+        ])
+    else:
+        subprocess.call([
+            'python', 'reconstruction-scripts/localization_pipeline.py',
+            '--colmap_path', args.colmap_path,
+            '--dataset_path', paths.dataset_path,
+            '--dataset_name', args.dataset_name,
+            '--method_name', args.method_name,
+            '--matches_file', paths.matches_file,
+            '--max_edge', str(max_size_dict[args.method_name][0]),
+            '--max_sum_edges', str(max_size_dict[args.method_name][1]),
+            '--output_path', paths.ref_results_file,
+            '--fm_triangulation', "1"
+        ])
