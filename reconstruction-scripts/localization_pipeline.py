@@ -18,6 +18,21 @@ from colmap_utils import compute_reconstruction_statistics, localize
 
 from model import PANet
 
+import sys
+
+import pickle
+
+sys.path.append('..')
+sys.path.append('../..')
+
+from build import pyfmcolmap
+from externals.hloc.hloc.utils.read_write_model import read_images_text
+
+from pathlib import Path
+
+import types
+
+import types_pb2
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -69,45 +84,55 @@ def parse_args():
         help='path to the output results file'
     )
 
+    parser.add_argument(
+        '--output_path_ref', type=str, default=None,
+        help='path to the output results file'
+    )
+
     args = parser.parse_args()
     return args
 
 
 if __name__ == "__main__":
    # Torch settings for the two-view estimation network.
-    torch.set_grad_enabled(False)
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda:0" if use_cuda else "cpu")
+    # torch.set_grad_enabled(False)
+    # use_cuda = torch.cuda.is_available()
+    # device = torch.device("cuda:0" if use_cuda else "cpu")
 
-    # Create the two-view estimation network.
-    net = PANet().to(device)
-
+    # # Create the two-view estimation network.
+    # net = PANet().to(device)
+    net = None
+    device = "cpu"
     # Parse arguments.
     args = parse_args()
-
+    
+    dataset_path_local = os.path.join('/cluster/scratch/plindenbe/ETH3D', args.dataset_name)
     # Create the extra paths.
     paths = types.SimpleNamespace()
     paths.dummy_database_path = os.path.join(
         args.dataset_path, 'database.db'
     )
     paths.image_path = os.path.join(
-        args.dataset_path, 'images'
+         args.dataset_path, 'images'
     )
     paths.reference_model_path = os.path.join(
-        args.dataset_path, 'dslr_calibration_undistorted'
+         args.dataset_path, 'dslr_calibration_undistorted'
     )
     paths.match_list_path = os.path.join(
         args.dataset_path, 'match-list.txt'
     )
 
+    print("Localization Pipeline")
+
     # Recover covisibility from reference model.
     images, intrinsics, poses, n_covisible_points = compute_reconstruction_statistics(paths.reference_model_path)
+    print("Localization Pipeline")
 
     # Invert the image name to image id dictionary.
     image_id_to_image_name = {}
     for image_name, image_id in images.items():
         image_id_to_image_name[image_id] = image_name
-
+    print("Localization Pipeline")
     # Precompute downsized images and scaling factors.
     numpy_images = {}
     facts = {}
@@ -120,12 +145,28 @@ if __name__ == "__main__":
         image = cv2.resize(image, None, fx=(1 / fact), fy=(1 / fact), interpolation=cv2.INTER_AREA)
         numpy_images[image_name] = image
         facts[image_name] = fact
-
+    print("Localization Pipeline")
     # Randomly select 10 query images.
     np.random.seed(0)
     all_images = list(images.items())
-    selected_images = [all_images[idx] for idx in np.random.choice(len(images), 10, replace=False)]
+    # selected_images = [all_images[idx] for idx in np.random.choice(len(images), 10, replace=False)]
 
+    # images = read_images_text(os.path.join(paths.reference_model_path, "images.txt"))
+    # print(os.path.join(args.dataset_path, "loc"))
+    # image_ids = list(set(int(str(p.name).split('-')[1]) for p in Path(os.path.join(args.dataset_path, "loc")).iterdir()))
+    selected_images = []
+    with open(os.path.join(args.dataset_path, "loc", "selected_images.txt"), "r") as doc:
+        for line in doc.readlines():
+            print(line)
+            name, img_id = line.split(" ")
+            selected_images.append([name, int(img_id)])
+    # names = [images[i].name for i in image_ids]
+    # selected_images = [(names[i], image_ids[i]) for i in range(len(image_ids))]
+    print(selected_images)
+
+    matching_file_proto = types_pb2.MatchingFile()
+    with open(args.matches_file, 'rb') as f:
+        matching_file_proto.ParseFromString(f.read())
     # Evaluation loop.
     for image_name, image_id in tqdm(selected_images):
         # Recover annotations.
@@ -148,9 +189,9 @@ if __name__ == "__main__":
             holdout_image_names.append(image_id_to_image_name[image_id_])
 
         # Localize image.
-        pose = localize(
+        pose, refined_pose = localize(
             image_id, image_name, camera_dict, holdout_image_names, numpy_images, facts, net, device, args.batch_size,
-            args.colmap_path, args.dataset_name, args.dataset_path, args.method_name, args.refine, args.matches_file,
+            args.colmap_path, args.dataset_name, args.dataset_path, args.method_name, args.refine, matching_file_proto,
             paths.dummy_database_path, paths.image_path, paths.reference_model_path, paths.match_list_path
         )
 
@@ -164,6 +205,26 @@ if __name__ == "__main__":
                 annotated_t = annotated_pose[: 3, 3]
                 R = pose[: 3, : 3]
                 t = pose[: 3, 3]
+
+                rotation_difference = R @ annotated_R.transpose()
+                ori_error = np.rad2deg(np.arccos(np.clip((np.trace(rotation_difference) - 1) / 2, -1, 1)))
+
+                annotated_C = (-1) * annotated_R.transpose() @ annotated_t
+                C = (-1) * R.transpose() @ t
+                center_error = np.linalg.norm(C - annotated_C)
+
+                f.write('[%s] - orientation error %4f deg, camera center error %4f\n' % (image_name, ori_error, center_error))
+        
+        # Refined Pose error.
+        with open(args.output_path_ref, 'a') as f:
+            if pose is None:
+                f.write('[%s] - failed\n' % image_name)
+            else:
+                # Compute the error
+                annotated_R = annotated_pose[: 3, : 3]
+                annotated_t = annotated_pose[: 3, 3]
+                R = refined_pose[: 3, : 3]
+                t = refined_pose[: 3, 3]
 
                 rotation_difference = R @ annotated_R.transpose()
                 ori_error = np.rad2deg(np.arccos(np.clip((np.trace(rotation_difference) - 1) / 2, -1, 1)))

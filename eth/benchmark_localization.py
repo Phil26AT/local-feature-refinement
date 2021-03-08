@@ -74,40 +74,44 @@ if __name__ == '__main__':
 
     # Define extra paths.
     paths = types.SimpleNamespace()
-    paths.dataset_path = os.path.join('ETH3D', args.dataset_name)
+    paths.root = "/cluster/scratch/psarlin/hloc_dumps/sfm_refinement/"#os.getenv("TMPDIR")
+    paths.main_path = os.path.join(paths.root, "ETH3D_train")#/cluster/scratch/psarlin/hloc_dumps/sfm_refinement/ETH3D_train/"
+    paths.dataset_path = os.path.join(paths.main_path, args.dataset_name)
+    paths.dataset_path_local = os.path.join('/cluster/scratch/plindenbe/ETH3D', args.dataset_name)
+
     paths.image_path = os.path.join(paths.dataset_path, 'images')
     paths.match_list_file = os.path.join(paths.dataset_path, 'match-list.txt')
-    paths.matches_file = os.path.join('output', '%s-%s-matches.pb' % (args.method_name, args.dataset_name))
+    paths.matches_file = os.path.join(paths.root, "ETH3D_matches", '%s-%s-matches.pb' % (args.method_name, args.dataset_name))
     paths.ref_results_file = os.path.join('output', '%s-%s-ref.loc.txt' % (args.method_name, args.dataset_name))
     paths.raw_results_file = os.path.join('output', '%s-%s-raw.loc.txt' % (args.method_name, args.dataset_name))
 
     # Compute the tentative matches graph and the two-view patch geometry estimates.
-    subprocess.call([
-        'python', 'two-view-refinement/compute_match_graph.py',
-        '--method_name', args.method_name,
-        '--max_edge', str(max_size_dict[args.method_name][0]),
-        '--max_sum_edges', str(max_size_dict[args.method_name][1]),
-        '--image_path', paths.image_path,
-        '--match_list_file', paths.match_list_file,
-        '--matcher', matcher_dict[args.method_name][0],
-        '--threshold', str(matcher_dict[args.method_name][1]),
-        '--output_file', paths.matches_file
-    ])
+    # subprocess.call([
+    #     'python', 'two-view-refinement/compute_match_graph.py',
+    #     '--method_name', args.method_name,
+    #     '--max_edge', str(max_size_dict[args.method_name][0]),
+    #     '--max_sum_edges', str(max_size_dict[args.method_name][1]),
+    #     '--image_path', paths.image_path,
+    #     '--match_list_file', paths.match_list_file,
+    #     '--matcher', matcher_dict[args.method_name][0],
+    #     '--threshold', str(matcher_dict[args.method_name][1]),
+    #     '--output_file', paths.matches_file
+    # ])
     
-    # Run localization for refined features.
-    if not skip_refinement:
-        subprocess.call([
-            'python', 'reconstruction-scripts/localization_pipeline.py',
-            '--colmap_path', args.colmap_path,
-            '--dataset_path', paths.dataset_path,
-            '--dataset_name', args.dataset_name,
-            '--method_name', args.method_name,
-            '--matches_file', paths.matches_file,
-            '--refine',
-            '--max_edge', str(max_size_dict[args.method_name][0]),
-            '--max_sum_edges', str(max_size_dict[args.method_name][1]),
-            '--output_path', paths.ref_results_file
-        ])
+    # # Run localization for refined features.
+    # if not skip_refinement:
+    #     subprocess.call([
+    #         'python', 'reconstruction-scripts/localization_pipeline.py',
+    #         '--colmap_path', args.colmap_path,
+    #         '--dataset_path', paths.dataset_path,
+    #         '--dataset_name', args.dataset_name,
+    #         '--method_name', args.method_name,
+    #         '--matches_file', paths.matches_file,
+    #         '--refine',
+    #         '--max_edge', str(max_size_dict[args.method_name][0]),
+    #         '--max_sum_edges', str(max_size_dict[args.method_name][1]),
+    #         '--output_path', paths.ref_results_file
+    #     ])
     
     # Run localization for raw features (without refinement).
     subprocess.call([
@@ -119,5 +123,6 @@ if __name__ == '__main__':
         '--matches_file', paths.matches_file,
         '--max_edge', str(max_size_dict[args.method_name][0]),
         '--max_sum_edges', str(max_size_dict[args.method_name][1]),
-        '--output_path', paths.raw_results_file
+        '--output_path', paths.raw_results_file,
+        '--output_path_ref', paths.ref_results_file
     ])

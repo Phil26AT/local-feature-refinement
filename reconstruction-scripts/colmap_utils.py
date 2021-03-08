@@ -26,6 +26,40 @@ import types_pb2
 
 from refinement import refine_matches_coarse_to_fine
 
+import sys
+
+sys.path.append('..')
+sys.path.append('../..')
+import pickle 
+
+from build import pyfmcolmap
+from externals.hloc.hloc.utils.read_write_model import rotmat2qvec
+
+
+fmcolmap_dict = {
+    "s2d_mean" : ["--Featuremap.type","python128",
+            "--Featuremap.dtype","half",
+            "--Featuremap.python_levels","2",
+            "--FeatureBundleAdjustment.optimization_mode", "0",
+            "--Featuremap.interpolation_mode", "1",
+            '--Featuremap.python_command','\'python -m features.s2dnet\'',
+            '--FeatureBundleAdjustment.use_embedded_point_iterations', "1",
+            "--FeatureBundleAdjustment.feature_loss_function","geman",
+            "--FeatureBundleAdjustment.feature_loss_function_scale", "0.1",
+            "--Featuremap.batch_size", "100",
+            "--Featuremap.sparse", "0",
+            "--Featuremap.extract_squared_distance_maps", "0",
+            "--Featuremap.sparse_patch_size", "10",
+            "--FeatureBundleAdjustment.point_optimization_enabled", "0",
+            "--FeatureBundleAdjustment.feature_regularization_enabled", "0",
+            "--FeatureBundleAdjustment.feature_regularization_track_weighting", "0",
+            "--FeatureBundleAdjustment.point_loss_function","geman",
+            "--FeatureBundleAdjustment.point_loss_function_scale","0.1",
+            "--FeatureBundleAdjustment.point_loss_function_magnitude","1.0",
+            "--FeatureBundleAdjustment.berhu_slope","0.5",
+            "--FeatureBundleAdjustment.max_num_iterations","10",
+            "--patch_size", "1"]
+}
 
 def generate_empty_reconstruction(reference_model_path, empty_model_path, holdout_image_names=[]):
     if not os.path.exists(empty_model_path):
@@ -547,43 +581,60 @@ def parse_reconstruction(scene_path):
 
 def localize(
         image_id, image_name, camera_dict, holdout_image_names, numpy_images, facts, net, device, batch_size,
-        colmap_path, dataset_name, dataset_path, method_name, refine, matches_file,
+        colmap_path, dataset_name, dataset_path, method_name, refine, matching_file_proto,
         dummy_database_path, image_path, reference_model_path, match_list_path
 ):
     # Define local paths.
+    print("Localize")
     partial_paths = types.SimpleNamespace()
     partial_paths.log_file = os.path.join(
         'output',
         '%s-%s-%s.loc-log.txt' % (method_name, dataset_name, 'ref' if refine else 'raw')
     )
+
+    partial_root = os.path.join(
+        dataset_path, 'loc', f'partial-{image_id}-{"ref" if refine else "raw"}')
+
     partial_paths.database_path = os.path.join(
-        dataset_path, method_name + '-partial.db'
+        # dataset_path, method_name + '-partial.db'
+        partial_root, method_name + '-partial.db'
     )
     partial_paths.model_path = os.path.join(
-        dataset_path, 'sparse-%s-partial' % method_name
+        # dataset_path, 'sparse-%s-partial' % method_name
+        partial_root, 'sparse-%s-partial' % method_name
     )
+
+    dataset_path_local = os.path.join('/cluster/scratch/plindenbe/ETH3D/', dataset_name)
+
+    partial_paths.fm_model_path = os.path.join(
+        # dataset_path, 'sparse-%s-partial' % method_name
+        dataset_path_local, 'sparse-%s-partial-fmref-loc' % method_name
+    )
+
     partial_paths.empty_model_path = os.path.join(
-        dataset_path, 'sparse-%s-partial-empty' % method_name
+        # dataset_path, 'sparse-%s-partial-empty' % method_name
+        partial_root, 'sparse-%s-partial-empty' % method_name
     )
     if refine:
         partial_paths.solution_file = os.path.join(
-            dataset_path, '%s-partial-solution.pb' % method_name
+            # dataset_path, '%s-partial-solution.pb' % method_name
+            partial_root, '%s-partial-solution.pb' % method_name
         )
     else:
         partial_paths.solution_file = None
     partial_paths.match_list_file = os.path.join(
-        dataset_path, 'match_list_partial_%s.txt' % method_name
+        # dataset_path, 'match_list_partial_%s.txt' % method_name
+        partial_root, 'match_list_partial_%s.txt' % method_name
     )
-
     # Start logging.
     with open(partial_paths.log_file, 'a') as f:
         f.write('%d %s\n' % (image_id, image_name))
 
     # Recover matches.
-    matching_file_proto = types_pb2.MatchingFile()
-    with open(matches_file, 'rb') as f:
-        matching_file_proto.ParseFromString(f.read())
-
+    # print("Before loading matches", matches_file)
+    # matching_file_proto = types_pb2.MatchingFile()
+    # with open(matches_file, 'rb') as f:
+    #     matching_file_proto.ParseFromString(f.read())
     all_matches = {}
     all_matching_scores = {}
     for image_pair in matching_file_proto.image_pairs:
@@ -603,58 +654,87 @@ def localize(
                 scores.append(match.similarity)
             all_matches[image_pair.image_name1] = np.array(matches).astype(np.uint32)
             all_matching_scores[image_pair.image_name1] = np.array(scores)
-
     # Empty reconstruction.
-    _ = generate_empty_reconstruction(reference_model_path, partial_paths.empty_model_path, holdout_image_names=holdout_image_names)
+    # _ = generate_empty_reconstruction(reference_model_path, partial_paths.empty_model_path, holdout_image_names=holdout_image_names)
 
     # Re-run solve-DFS.
-    if refine:
-        subprocess.call([
-            'multi-view-refinement/build/solve',
-            '--matches_file=%s' % matches_file,
-            '--output_file=%s' % partial_paths.solution_file
-        ] + [
-            ('--holdout_images=%s' % image_name) for image_name in holdout_image_names
-        ], stdout=open(partial_paths.log_file, 'a'))
+    # if refine:
+    #     subprocess.call([
+    #         'multi-view-refinement/build/solve',
+    #         '--matches_file=%s' % matches_file,
+    #         '--output_file=%s' % partial_paths.solution_file
+    #     ] + [
+    #         ('--holdout_images=%s' % image_name) for image_name in holdout_image_names
+    #     ], stdout=open(partial_paths.log_file, 'a'))
 
-    # Create a new database.
-    shutil.copyfile(dummy_database_path, partial_paths.database_path)
+    # # Create a new database.
+    # shutil.copyfile(dummy_database_path, partial_paths.database_path)
     
-    # Prepare GV list.
-    with open(match_list_path, 'r') as f:
-        lines = f.readlines()
-    with open(partial_paths.match_list_file, 'w') as f:
-        for line in lines:
-            line_aux = line.strip('\n').split(' ')
-            if line_aux[0] in holdout_image_names or line_aux[1] in holdout_image_names:
-                continue
-            f.write(line)
+    # # Prepare GV list.
+    # with open(match_list_path, 'r') as f:
+    #     lines = f.readlines()
+    # with open(partial_paths.match_list_file, 'w') as f:
+    #     for line in lines:
+    #         line_aux = line.strip('\n').split(' ')
+    #         if line_aux[0] in holdout_image_names or line_aux[1] in holdout_image_names:
+    #             continue
+    #         f.write(line)
     
     # Import features to a new database.
-    import_features(
-        colmap_path, method_name, partial_paths.database_path, image_path,
-        partial_paths.match_list_file, matches_file, partial_paths.solution_file,
-        holdout_image_names=holdout_image_names,
-        stdout_file=partial_paths.log_file
-    )
+    # import_features(
+    #     colmap_path, method_name, partial_paths.database_path, image_path,
+    #     partial_paths.match_list_file, matches_file, partial_paths.solution_file,
+    #     holdout_image_names=holdout_image_names,
+    #     stdout_file=partial_paths.log_file
+    # )
 
     # Triangulate model.
-    triangulate(colmap_path, partial_paths.database_path, image_path, partial_paths.empty_model_path, partial_paths.model_path, None, stdout_file=partial_paths.log_file)
+    # triangulate(colmap_path, partial_paths.database_path, image_path, partial_paths.empty_model_path, partial_paths.model_path, None, stdout_file=partial_paths.log_file)
 
+    # Refine Model
+    """
+    Our triangulation script
+    """
+    fm_triangulation = False
+    if fm_triangulation:
+        print("Feature Triangulation: ", partial_paths.model_path, partial_paths.fm_model_path)
+        #fmpath = partial_paths.model_path + "/fmreconstruction/"
+        cmd = ["/cluster/home/plindenbe/FeatureMetricSfM/build/fmcolmap", "feature_bundle_adjuster", 
+            '--image_path', image_path,
+            '--input_path', partial_paths.model_path,
+            '--output_path', partial_paths.fm_model_path,
+            '--FeatureBundleAdjustment.refine_focal_length', '0',
+            '--FeatureBundleAdjustment.refine_principal_point', '0',
+            '--FeatureBundleAdjustment.refine_extra_params', '0',
+            '--FeatureBundleAdjustment.refine_extrinsics', '0',
+            '--Featuremap.load_from_cache', "1",
+            '--Featuremap.cache_path', os.getenv("TMPDIR") + "/cache/" + dataset_name] + fmcolmap_dict["s2d_mean"]
+        print(' '.join(cmd))
+        subprocess.call(cmd)
+        
+        # Convert model to TXT.
+        subprocess.call([
+            os.path.join(colmap_path, 'colmap'), 'model_converter',
+            '--input_path', partial_paths.fm_model_path,
+            '--output_path', partial_paths.fm_model_path,
+            '--output_type', 'TXT'
+        ])
     # Parse reconstruction.
-    points3D, points2D_idx_to_points3D_id, points2D_idx_reprojected = parse_reconstruction(partial_paths.model_path)
+    print(partial_paths.model_path)
+    points3D, points2D_idx_to_points3D_id, points2D_idx_reprojected = parse_reconstruction(partial_paths.fm_model_path if fm_triangulation else partial_paths.model_path)
 
     # 2D-3D matching.
     image1 = numpy_images[image_name]
     fact1 = facts[image_name]
-
+    print(os.path.join(
+        image_path, '%s.%s' % (image_name, method_name)))
     # Load the features.
     features1 = np.load(os.path.join(
         image_path, '%s.%s' % (image_name, method_name)
     ), allow_pickle=True)
     keypoints1 = features1['keypoints'][:, : 2]
     descriptors1 = features1['descriptors']
-
+    print("1")
     if keypoints1.shape[0] != 0:
         matched_tracks = [{} for _ in range(keypoints1.shape[0])]
         matched_tracks_scores = [{} for _ in range(keypoints1.shape[0])]
@@ -710,6 +790,7 @@ def localize(
         # PnP.
         pnp_points2D = []
         pnp_points3D = []
+        pnp_points3D_id = []
         for p2D_idx, tracks in enumerate(matched_tracks):
             for p3D_id in tracks:
                 p3D = points3D[p3D_id]
@@ -720,23 +801,62 @@ def localize(
 
                 pnp_points3D.append(p3D)
                 pnp_points2D.append(p2D)
+                pnp_points3D_id.append(p3D_id)
 
         pose_dict = pycolmap.absolute_pose_estimation(pnp_points2D, pnp_points3D, camera_dict, 12)
+        tvec = pose_dict["tvec"]
+        qvec = pose_dict["qvec"]
 
         if pose_dict['success']:
-            pose = colmap_pose_to_matrix(pose_dict['qvec'], pose_dict['tvec'])
+            refined_pose = colmap_pose_to_matrix(pose_dict['qvec'], pose_dict['tvec'])
         else:
             pose = None
+            refined_pose = None
+
+        # Load pose from PnP
+        # T = np.loadtxt(os.path.join(partial_root, f'pnp-pose-{method_name}.txt'))
+        # tvec, qvec = T[:3, 3], rotmat2qvec(T[:3, :3])
+
+        cmd = ['--FeatureBundleAdjustment.refine_focal_length', '0',
+            '--FeatureBundleAdjustment.refine_principal_point', '0',
+            '--FeatureBundleAdjustment.refine_extra_params', '0',
+            '--FeatureBundleAdjustment.refine_extrinsics', '1',
+            '--Featuremap.dtype', "half",
+            '--Featuremap.type', "python128",
+            '--Featuremap.load_from_cache', "1",
+            '--Featuremap.cache_path', os.getenv("TMPDIR") + "/cache/" + dataset_name, "--FeatureBundleAdjustment.max_num_iterations","10"]
+
+        dump_path = os.path.join(
+                    partial_root, f'pnp-dict-{method_name}-{"raw"}.pkl')
+        with open(dump_path, 'rb') as f:
+            saved_pose_dict = pickle.load(f)
+
+        # print(cmd)
+        pose = colmap_pose_to_matrix(saved_pose_dict['qvec'], saved_pose_dict['tvec'])
+        # refined_pose_dict = pyfmcolmap.feature_pose_refinement(
+        #     np.array(pnp_points2D),
+        #     np.array(pnp_points3D_id),
+        #     saved_pose_dict['qvec'],
+        #     saved_pose_dict['tvec'],
+        #     image_name,
+        #     camera_dict,
+        #     partial_paths.model_path,
+        #     image_path,
+        #     " ".join(cmd))
+        # print(refined_pose_dict["pose_change"])
+        #refined_pose = colmap_pose_to_matrix(refined_pose_dict['qvec'], refined_pose_dict['tvec'])
+       
     else:
         pose = None
+        refined_pose = None
 
     # Remove auxiliary files.
-    os.remove(partial_paths.database_path)
-    if refine:
-        os.remove(partial_paths.solution_file)
-    os.remove(partial_paths.match_list_file)
+    # os.remove(partial_paths.database_path)
+    # if refine:
+    #     os.remove(partial_paths.solution_file)
+    # os.remove(partial_paths.match_list_file)
 
-    shutil.rmtree(partial_paths.empty_model_path)
-    shutil.rmtree(partial_paths.model_path)
+    # shutil.rmtree(partial_paths.empty_model_path)
+    # shutil.rmtree(partial_paths.model_path)
 
-    return pose
+    return pose, refined_pose
