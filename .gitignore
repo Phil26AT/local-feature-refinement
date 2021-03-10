@@ -8,3 +8,6 @@ types.pb.h
 output
 LFE
 ETH3D
+
+d2-net/
+SuperPointPretrainedNetwork/

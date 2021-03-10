@@ -30,6 +30,12 @@ def parse_args():
         '--matches_file', type=str, required=True,
         help='path to the matches file'
     )
+
+    parser.add_argument(
+        '--h5keypoint_file', type=str, default=None,
+        help='path to the HDF5 keypoint file (leave None for default features)'
+    )
+
     parser.add_argument(
         '--solution_file', type=str, default=None,
         help='path to the multi-view optimization solution file (leave None for no refinement)'
@@ -41,7 +47,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    refine = (args.solution_file is not None)
+    refine = (args.h5keypoint_file is not None)
 
     # Create the extra paths.
     paths = types.SimpleNamespace()
@@ -68,11 +74,11 @@ if __name__ == "__main__":
     )
 
     # Create a copy of the dummy database.
-    print(paths.database_path)
-    if os.path.exists(paths.database_path):
-        raise FileExistsError(
-            'The database file already exists.'
-        )
+    # print(paths.database_path)
+    # if os.path.exists(paths.database_path):
+    #     raise FileExistsError(
+    #         'The database file already exists.'
+    #     )
     shutil.copyfile(
         os.path.join(args.dataset_path, 'database.db'),
         paths.database_path
@@ -86,7 +92,7 @@ if __name__ == "__main__":
     import_features(
         args.colmap_path, args.method_name,
         paths.database_path, paths.image_path, paths.match_list_path,
-        args.matches_file, args.solution_file
+        args.matches_file, args.solution_file, h5keypoint_file=args.h5keypoint_file
     )
     triangulate(
         args.colmap_path,

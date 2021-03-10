@@ -162,7 +162,7 @@ if __name__ == '__main__':
 
         # Build the proto object.
         image_pair_proto = matching_file_proto.image_pairs.add()
-
+        
         image_pair_proto.image_name1 = image_name1
         image_pair_proto.fact1 = fact1
         image_pair_proto.image_name2 = image_name2

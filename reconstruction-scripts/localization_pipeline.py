@@ -89,6 +89,11 @@ def parse_args():
         help='path to the output results file'
     )
 
+    parser.add_argument(
+        '--levels', type=int, default=None,
+        help='path to the output results file'
+    )
+
     args = parser.parse_args()
     return args
 
@@ -189,10 +194,10 @@ if __name__ == "__main__":
             holdout_image_names.append(image_id_to_image_name[image_id_])
 
         # Localize image.
-        pose, refined_pose = localize(
+        pose, refined_pose, refined_loc_pose = localize(
             image_id, image_name, camera_dict, holdout_image_names, numpy_images, facts, net, device, args.batch_size,
             args.colmap_path, args.dataset_name, args.dataset_path, args.method_name, args.refine, matching_file_proto,
-            paths.dummy_database_path, paths.image_path, paths.reference_model_path, paths.match_list_path
+            paths.dummy_database_path, paths.image_path, paths.reference_model_path, paths.match_list_path, args.levels
         )
 
         # Pose error.
@@ -213,6 +218,9 @@ if __name__ == "__main__":
                 C = (-1) * R.transpose() @ t
                 center_error = np.linalg.norm(C - annotated_C)
 
+
+                print("Raw", ori_error, center_error)
+
                 f.write('[%s] - orientation error %4f deg, camera center error %4f\n' % (image_name, ori_error, center_error))
         
         # Refined Pose error.
@@ -232,5 +240,28 @@ if __name__ == "__main__":
                 annotated_C = (-1) * annotated_R.transpose() @ annotated_t
                 C = (-1) * R.transpose() @ t
                 center_error = np.linalg.norm(C - annotated_C)
+
+                print("Ref", ori_error, center_error)
+
+                f.write('[%s] - orientation error %4f deg, camera center error %4f\n' % (image_name, ori_error, center_error))
+
+        with open(args.output_path_ref.replace("-ref", "-refloc"), 'a') as f:
+            if pose is None:
+                f.write('[%s] - failed\n' % image_name)
+            else:
+                # Compute the error
+                annotated_R = annotated_pose[: 3, : 3]
+                annotated_t = annotated_pose[: 3, 3]
+                R = refined_loc_pose[: 3, : 3]
+                t = refined_loc_pose[: 3, 3]
+
+                rotation_difference = R @ annotated_R.transpose()
+                ori_error = np.rad2deg(np.arccos(np.clip((np.trace(rotation_difference) - 1) / 2, -1, 1)))
+
+                annotated_C = (-1) * annotated_R.transpose() @ annotated_t
+                C = (-1) * R.transpose() @ t
+                center_error = np.linalg.norm(C - annotated_C)
+
+                print("RefLoc", ori_error, center_error)
 
                 f.write('[%s] - orientation error %4f deg, camera center error %4f\n' % (image_name, ori_error, center_error))

@@ -34,32 +34,8 @@ import pickle
 
 from build import pyfmcolmap
 from externals.hloc.hloc.utils.read_write_model import rotmat2qvec
+from read_write_keypoints_h5 import read_keypointsh5
 
-
-fmcolmap_dict = {
-    "s2d_mean" : ["--Featuremap.type","python128",
-            "--Featuremap.dtype","half",
-            "--Featuremap.python_levels","2",
-            "--FeatureBundleAdjustment.optimization_mode", "0",
-            "--Featuremap.interpolation_mode", "1",
-            '--Featuremap.python_command','\'python -m features.s2dnet\'',
-            '--FeatureBundleAdjustment.use_embedded_point_iterations', "1",
-            "--FeatureBundleAdjustment.feature_loss_function","geman",
-            "--FeatureBundleAdjustment.feature_loss_function_scale", "0.1",
-            "--Featuremap.batch_size", "100",
-            "--Featuremap.sparse", "0",
-            "--Featuremap.extract_squared_distance_maps", "0",
-            "--Featuremap.sparse_patch_size", "10",
-            "--FeatureBundleAdjustment.point_optimization_enabled", "0",
-            "--FeatureBundleAdjustment.feature_regularization_enabled", "0",
-            "--FeatureBundleAdjustment.feature_regularization_track_weighting", "0",
-            "--FeatureBundleAdjustment.point_loss_function","geman",
-            "--FeatureBundleAdjustment.point_loss_function_scale","0.1",
-            "--FeatureBundleAdjustment.point_loss_function_magnitude","1.0",
-            "--FeatureBundleAdjustment.berhu_slope","0.5",
-            "--FeatureBundleAdjustment.max_num_iterations","10",
-            "--patch_size", "1"]
-}
 
 def generate_empty_reconstruction(reference_model_path, empty_model_path, holdout_image_names=[]):
     if not os.path.exists(empty_model_path):
@@ -120,7 +96,8 @@ def complete_keypoints(keypoints):
         return keypoints
 
 
-def import_features(colmap_path, method_name, database_path, image_path, match_list_path, matches_file, solution_file, holdout_image_names=[], stdout_file=None):
+def import_features(colmap_path, method_name, database_path, image_path, match_list_path, matches_file, solution_file, 
+                holdout_image_names=[], stdout_file=None, h5keypoint_file=None):
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
 
@@ -160,11 +137,15 @@ def import_features(colmap_path, method_name, database_path, image_path, match_l
     for image_name, image_id in images.items():
         if image_name in holdout_image_names:
             continue
+        
+        if h5keypoint_file is not None:
+            keypoints = read_keypointsh5(h5keypoint_file, image_name)
+        else:
+            keypoint_path = os.path.join(image_path, '%s.%s' % (image_name, method_name))
+            features = np.load(keypoint_path, allow_pickle=True)
+            keypoints = features['keypoints'][:, : 3]
 
-        keypoint_path = os.path.join(image_path, '%s.%s' % (image_name, method_name))
-        features = np.load(keypoint_path, allow_pickle=True)
 
-        keypoints = features['keypoints'][:, : 3]
         if keypoints.shape[0] == 0:
             keypoints = np.zeros([0, 4])
         keypoints = complete_keypoints(keypoints).astype(np.float32)
@@ -390,7 +371,7 @@ def triangulate(colmap_path, database_path, image_path, empty_model_path, model_
             '--output_path', ply_model_path,
             '--output_type', 'PLY'
         ], stdout=stdout)
-
+    print(ply_model_path, model_path)
     # Model stats.
     # subprocess.call([
     #     os.path.join(colmap_path, 'colmap'), 'model_analyzer',
@@ -582,7 +563,7 @@ def parse_reconstruction(scene_path):
 def localize(
         image_id, image_name, camera_dict, holdout_image_names, numpy_images, facts, net, device, batch_size,
         colmap_path, dataset_name, dataset_path, method_name, refine, matching_file_proto,
-        dummy_database_path, image_path, reference_model_path, match_list_path
+        dummy_database_path, image_path, reference_model_path, match_list_path, levels
 ):
     # Define local paths.
     print("Localize")
@@ -695,7 +676,32 @@ def localize(
     """
     Our triangulation script
     """
-    fm_triangulation = False
+    
+    fmcolmap_dict = {
+        "s2d_mean" : ["--Featuremap.type","python128",
+            "--Featuremap.dtype","half",
+            "--Featuremap.python_levels",str(levels),
+            "--FeatureBundleAdjustment.optimization_mode", "0",
+            "--Featuremap.interpolation_mode", "1",
+            '--Featuremap.python_command','python -m features.s2dnet',
+            '--FeatureBundleAdjustment.use_embedded_point_iterations', "1",
+            "--FeatureBundleAdjustment.feature_loss_function","geman",
+            "--FeatureBundleAdjustment.feature_loss_function_scale", "0.1",
+            "--Featuremap.batch_size", "100",
+            "--Featuremap.sparse", "0",
+            "--Featuremap.extract_squared_distance_maps", "0",
+            "--Featuremap.sparse_patch_size", "10",
+            "--FeatureBundleAdjustment.point_optimization_enabled", "0",
+            "--FeatureBundleAdjustment.feature_regularization_enabled", "0",
+            "--FeatureBundleAdjustment.feature_regularization_track_weighting", "0",
+            "--FeatureBundleAdjustment.point_loss_function","geman",
+            "--FeatureBundleAdjustment.point_loss_function_scale","0.3",
+            "--FeatureBundleAdjustment.point_loss_function_magnitude","1.0",
+            "--FeatureBundleAdjustment.berhu_slope","1.0",
+            "--FeatureBundleAdjustment.max_num_iterations","2",
+            "--patch_size", "1"],
+    }
+    fm_triangulation = True
     if fm_triangulation:
         print("Feature Triangulation: ", partial_paths.model_path, partial_paths.fm_model_path)
         #fmpath = partial_paths.model_path + "/fmreconstruction/"
@@ -812,6 +818,7 @@ def localize(
         else:
             pose = None
             refined_pose = None
+            refined_loc_pose = None
 
         # Load pose from PnP
         # T = np.loadtxt(os.path.join(partial_root, f'pnp-pose-{method_name}.txt'))
@@ -821,10 +828,28 @@ def localize(
             '--FeatureBundleAdjustment.refine_principal_point', '0',
             '--FeatureBundleAdjustment.refine_extra_params', '0',
             '--FeatureBundleAdjustment.refine_extrinsics', '1',
-            '--Featuremap.dtype', "half",
-            '--Featuremap.type', "python128",
+            "--Featuremap.type","python128",
+            "--Featuremap.dtype","half",
+            "--Featuremap.python_levels",str(levels),
+            "--FeatureBundleAdjustment.optimization_mode", "0",
+            "--Featuremap.interpolation_mode", "1",
+            "--FeatureBundleAdjustment.feature_loss_function","cauchy",
+            "--FeatureBundleAdjustment.feature_loss_function_scale", "1.0",
+            "--Featuremap.batch_size", "100",
+            "--Featuremap.sparse", "0",
+            "--Featuremap.extract_squared_distance_maps", "0",
+            "--Featuremap.sparse_patch_size", "10",
+            "--FeatureBundleAdjustment.point_optimization_enabled", "0",
+            "--FeatureBundleAdjustment.feature_regularization_enabled", "0",
+            "--FeatureBundleAdjustment.feature_regularization_track_weighting", "0",
+            "--FeatureBundleAdjustment.point_loss_function","tolerant",
+            "--FeatureBundleAdjustment.point_loss_function_scale","1.0",
+            "--FeatureBundleAdjustment.point_loss_function_magnitude","0.01",
+            "--FeatureBundleAdjustment.berhu_slope","1.0",
+            "--FeatureBundleAdjustment.max_num_iterations","10",
+            "--patch_size", "1",
             '--Featuremap.load_from_cache', "1",
-            '--Featuremap.cache_path', os.getenv("TMPDIR") + "/cache/" + dataset_name, "--FeatureBundleAdjustment.max_num_iterations","10"]
+            '--Featuremap.cache_path', os.getenv("TMPDIR") + "/cache/" + dataset_name]
 
         dump_path = os.path.join(
                     partial_root, f'pnp-dict-{method_name}-{"raw"}.pkl')
@@ -833,22 +858,26 @@ def localize(
 
         # print(cmd)
         pose = colmap_pose_to_matrix(saved_pose_dict['qvec'], saved_pose_dict['tvec'])
-        # refined_pose_dict = pyfmcolmap.feature_pose_refinement(
-        #     np.array(pnp_points2D),
-        #     np.array(pnp_points3D_id),
-        #     saved_pose_dict['qvec'],
-        #     saved_pose_dict['tvec'],
-        #     image_name,
-        #     camera_dict,
-        #     partial_paths.model_path,
-        #     image_path,
-        #     " ".join(cmd))
-        # print(refined_pose_dict["pose_change"])
-        #refined_pose = colmap_pose_to_matrix(refined_pose_dict['qvec'], refined_pose_dict['tvec'])
+
+        if fm_triangulation:
+            saved_pose_dict = pose_dict
+        refined_pose_dict = pyfmcolmap.feature_pose_refinement(
+            np.array(pnp_points2D)[saved_pose_dict["inliers"]],
+            np.array(pnp_points3D_id)[saved_pose_dict["inliers"]],
+            saved_pose_dict['qvec'],
+            saved_pose_dict['tvec'],
+            image_name,
+            camera_dict,
+            partial_paths.model_path,
+            image_path,
+            " ".join(cmd))
+        #print(refined_pose_dict["pose_change"])
+        refined_loc_pose = colmap_pose_to_matrix(refined_pose_dict['qvec'], refined_pose_dict['tvec'])
        
     else:
         pose = None
         refined_pose = None
+        refined_loc_pose = None
 
     # Remove auxiliary files.
     # os.remove(partial_paths.database_path)
@@ -859,4 +888,4 @@ def localize(
     # shutil.rmtree(partial_paths.empty_model_path)
     # shutil.rmtree(partial_paths.model_path)
 
-    return pose, refined_pose
+    return pose, refined_pose, refined_loc_pose

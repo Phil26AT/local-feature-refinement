@@ -57,6 +57,11 @@ def parse_args():
         help='method name'
     )
 
+    parser.add_argument(
+        '--levels', type=int, default=None,
+        help='path to the output results file'
+    )
+
     args = parser.parse_args()
     return args
 
@@ -67,10 +72,11 @@ if __name__ == '__main__':
     # Check that method exists in dictionaries with constants.
     if (args.method_name not in max_size_dict) or (args.method_name not in matcher_dict):
         raise ValueError('Method \'%s\' is unknown. Make sure it was added to the dictionaries with constants.' % args.method_name)
-
+    
+    output = "output" + str(args.levels)
     # Create the output folder.
-    if not os.path.exists('output'):
-        os.mkdir('output')
+    if not os.path.exists(output):
+        os.mkdir(output)
 
     # Define extra paths.
     paths = types.SimpleNamespace()
@@ -82,8 +88,8 @@ if __name__ == '__main__':
     paths.image_path = os.path.join(paths.dataset_path, 'images')
     paths.match_list_file = os.path.join(paths.dataset_path, 'match-list.txt')
     paths.matches_file = os.path.join(paths.root, "ETH3D_matches", '%s-%s-matches.pb' % (args.method_name, args.dataset_name))
-    paths.ref_results_file = os.path.join('output', '%s-%s-ref.loc.txt' % (args.method_name, args.dataset_name))
-    paths.raw_results_file = os.path.join('output', '%s-%s-raw.loc.txt' % (args.method_name, args.dataset_name))
+    paths.ref_results_file = os.path.join(output, '%s-%s-ref.loc.txt' % (args.method_name, args.dataset_name))
+    paths.raw_results_file = os.path.join(output, '%s-%s-raw.loc.txt' % (args.method_name, args.dataset_name))
 
     # Compute the tentative matches graph and the two-view patch geometry estimates.
     # subprocess.call([
@@ -124,5 +130,6 @@ if __name__ == '__main__':
         '--max_edge', str(max_size_dict[args.method_name][0]),
         '--max_sum_edges', str(max_size_dict[args.method_name][1]),
         '--output_path', paths.raw_results_file,
-        '--output_path_ref', paths.ref_results_file
+        '--output_path_ref', paths.ref_results_file,
+        '--levels', str(args.levels)
     ])
